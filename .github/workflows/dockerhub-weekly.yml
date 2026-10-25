@@ -21,21 +21,20 @@ jobs:
     steps:
       - name: Get latest upstream release
         id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(gh release view --repo cnjack/jcode --json tagName --jq .tagName)"
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Check Docker Hub latest tag version
+      - name: Check Docker Hub version tag
         id: check
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          latest_version="$(curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest" \
-            | jq -r '.images[0].labels["org.opencontainers.image.version"] // empty')"
-          if [[ "$latest_version" == "${{ steps.release.outputs.version }}" ]]; then
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/${VERSION}")"
+          if [[ "$status" == 200 ]]; then
             echo 'publish=false' >> "$GITHUB_OUTPUT"
           else
             echo 'publish=true' >> "$GITHUB_OUTPUT"
