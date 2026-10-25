@@ -13,12 +13,19 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -o /out/jcode ./cmd/jcode
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates git openssh-client \
+RUN apk add --no-cache ca-certificates git openssh-client chromium font-noto font-noto-cjk font-noto-emoji \
     && addgroup -S jcode \
     && adduser -S -G jcode -h /home/jcode jcode \
     && mkdir -p /workspace \
     && chown jcode:jcode /workspace
 COPY --from=build /out/jcode /usr/local/bin/jcode
+# jcode looks up google-chrome/chromium on PATH. Wrap Alpine's chromium with the flags
+# needed in a locked-down container (no user namespaces for the sandbox, small /dev/shm,
+# no GPU, and crashpad needs a database dir that a read-only rootfs does not have).
+RUN printf '%s\n' '#!/bin/sh' \
+    'exec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-breakpad "$@"' \
+    > /usr/local/bin/google-chrome \
+    && chmod 755 /usr/local/bin/google-chrome
 ENV HOME=/home/jcode
 USER jcode
 WORKDIR /workspace
