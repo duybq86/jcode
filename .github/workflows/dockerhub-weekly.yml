@@ -28,21 +28,15 @@ jobs:
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Check Docker Hub current image version
+      - name: Check Docker Hub latest tag version
         id: check
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          token="$(curl -fsS -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg username "$DOCKERHUB_USERNAME" --arg password "$DOCKERHUB_TOKEN" '{username:$username,password:$password}')" \
-            https://hub.docker.com/v2/users/login/ | jq -r .token)"
-          current="$(curl -fsS -H "Authorization: Bearer $token" \
-            "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest" | jq -r '.full_size // 0')"
-          latest_version="$(curl -fsS -H "Authorization: Bearer $token" \
-            "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest" | jq -r '.images[0].labels.version // empty')"
-          if [[ "$latest_version" == "$VERSION" && "$current" != 0 ]]; then
+          response="$(curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest")"
+          latest_version="$(jq -r '.images[0].labels["org.opencontainers.image.version"] // empty' <<< "$response")"
+          if [[ "$latest_version" == "$VERSION" ]]; then
             echo 'publish=false' >> "$GITHUB_OUTPUT"
           else
             echo 'publish=true' >> "$GITHUB_OUTPUT"
@@ -54,26 +48,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout upstream release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: cnjack/jcode
           ref: ${{ needs.check-release.outputs.version }}
           persist-credentials: false
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push versioned and latest tags
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
