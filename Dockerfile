@@ -24,4 +24,4 @@ USER jcode
 WORKDIR /workspace
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/jcode"]
-CMD ["web", "--host", "0.0.0.0", "--port", "8080", "--open=false", "--auth-token", "${JCODE_WEB_TOKEN}"]
+CMD ["web", "--host", "0.0.0.0", "--port", "8080", "--open=false"]
