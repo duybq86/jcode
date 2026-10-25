@@ -16,14 +16,17 @@ FROM ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Base tools. Ubuntu ships a default "ubuntu" user on uid 1000, which the k8s
-# manifests rely on for jcode, so remove it first.
+# manifests rely on for jcode, so remove it first. jcode gets passwordless sudo so
+# the agent can apt-get install more tools (the pod must allow privilege escalation).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl wget gnupg git openssh-client jq unzip zip \
-        ripgrep procps less tzdata \
+        ripgrep procps less tzdata sudo bash-completion \
     && userdel -r ubuntu \
     && groupadd --system --gid 1000 jcode \
     && useradd --system --uid 1000 --gid jcode --create-home --home-dir /home/jcode --shell /bin/bash jcode \
+    && echo 'jcode ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/jcode \
+    && chmod 0440 /etc/sudoers.d/jcode \
     && mkdir -p /workspace \
     && chown jcode:jcode /workspace \
     && rm -rf /var/lib/apt/lists/*
