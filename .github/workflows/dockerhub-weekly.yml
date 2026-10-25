@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '23 6 * * 1'
   workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and overwrite tags even if latest already has the newest upstream release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,16 +71,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Fail open: any lookup error means rebuild. Same tag content, harmless.
-      - name: Check whether this version is already published
+      # Tags are dates, so the built upstream release is read from the image label.
+      # Fail open: any lookup error means rebuild, which only overwrites tags.
+      - name: Check whether latest already has this release
         id: check
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ steps.release.outputs.version }}
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/jcode:latest
+          VERSION: ${{ steps.release.outputs.version }}
+          FORCE: ${{ inputs.force }}
         run: |
-          if docker buildx imagetools inspect "$IMAGE" > /dev/null 2>&1; then
-            echo "::notice::$IMAGE already exists, skipping build"
+          published="$(docker buildx imagetools inspect "$IMAGE" \
+            --format '{{ index (index .Image "linux/amd64").Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null || true)"
+          if [[ "$FORCE" != 'true' && "$published" == "$VERSION" ]]; then
+            echo "::notice::$IMAGE already built from $VERSION, skipping"
             echo 'publish=false' >> "$GITHUB_OUTPUT"
           else
+            echo "::notice::publishing $VERSION (latest has 'none', force=false)"
             echo 'publish=true' >> "$GITHUB_OUTPUT"
           fi
 
@@ -100,6 +111,10 @@ jobs:
           ref: ${{ needs.check-release.outputs.version }}
           path: src
           persist-credentials: false
+
+      - name: Get build date
+        id: date
+        run: echo "tag=$(TZ=Asia/Ho_Chi_Minh date +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
       - name: Get upstream commit
         id: upstream
@@ -135,7 +150,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push versioned and latest tags
+      - name: Build and push date and latest tags
         uses: docker/build-push-action@v7
         with:
           context: src
@@ -146,7 +161,7 @@ jobs:
             VERSION=${{ needs.check-release.outputs.version }}
             COMMIT=${{ steps.upstream.outputs.sha }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ needs.check-release.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ steps.date.outputs.tag }}
             ${{ secrets.DOCKERHUB_USERNAME }}/jcode:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ env.UPSTREAM }}
