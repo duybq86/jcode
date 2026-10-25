@@ -32,11 +32,10 @@ jobs:
         id: check
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          response="$(curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest")"
-          latest_version="$(jq -r '.images[0].labels["org.opencontainers.image.version"] // empty' <<< "$response")"
-          if [[ "$latest_version" == "$VERSION" ]]; then
+          latest_version="$(curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/latest" \
+            | jq -r '.images[0].labels["org.opencontainers.image.version"] // empty')"
+          if [[ "$latest_version" == "${{ steps.release.outputs.version }}" ]]; then
             echo 'publish=false' >> "$GITHUB_OUTPUT"
           else
             echo 'publish=true' >> "$GITHUB_OUTPUT"
@@ -53,6 +52,25 @@ jobs:
           repository: cnjack/jcode
           ref: ${{ needs.check-release.outputs.version }}
           persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Generate model registry
+        run: make generate
+
+      - name: Build embedded web frontend
+        run: make build-web
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
