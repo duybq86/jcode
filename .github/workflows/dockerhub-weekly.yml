@@ -34,11 +34,11 @@ jobs:
         run: |
           status="$(curl -sS -o /dev/null -w '%{http_code}' \
             "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/jcode/tags/${VERSION}")"
-          if [[ "$status" == 200 ]]; then
-            echo 'publish=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
-          fi
+          case "$status" in
+            200) echo 'publish=false' >> "$GITHUB_OUTPUT" ;;
+            404) echo 'publish=true' >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unexpected Docker Hub response: HTTP $status" >&2; exit 1 ;;
+          esac
 
   build-and-push:
     needs: check-release
