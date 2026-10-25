@@ -1,0 +1,154 @@
+name: Build and publish Docker image
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-latest
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: cnjack/jcode
+
+jobs:
+  sync-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # Best effort: never blocks the build, which checks out the upstream tag directly.
+      # GITHUB_TOKEN cannot push upstream changes to .github/workflows, and conflicts
+      # also fail here. Both only emit a warning.
+      - name: Sync default branch from upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          gh api -X POST "repos/$REPO/merge-upstream" -f branch="$BRANCH" --jq .message \
+            || echo "::warning::Fork sync failed (conflict, or upstream changed workflow files)"
+
+  check-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - name: Require Docker Hub secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo '::error::Repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are required'
+            exit 1
+          fi
+
+      - name: Get latest upstream release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName)"
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Fail open: any lookup error means rebuild. Same tag content, harmless.
+      - name: Check whether this version is already published
+        id: check
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ steps.release.outputs.version }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "::notice::$IMAGE already exists, skipping build"
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    needs: check-release
+    if: needs.check-release.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Dockerfile from this fork
+        uses: actions/checkout@v7
+        with:
+          path: fork
+          sparse-checkout: Dockerfile
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Checkout upstream release tag
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check-release.outputs.version }}
+          path: src
+          persist-credentials: false
+
+      - name: Get upstream commit
+        id: upstream
+        working-directory: src
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: src/go.mod
+          cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Build model registry and embedded web UI
+        working-directory: src
+        run: |
+          npm install -g pnpm
+          make build-web
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push versioned and latest tags
+        uses: docker/build-push-action@v7
+        with:
+          context: src
+          file: fork/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.check-release.outputs.version }}
+            COMMIT=${{ steps.upstream.outputs.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ needs.check-release.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ env.UPSTREAM }}
+            org.opencontainers.image.version=${{ needs.check-release.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.upstream.outputs.sha }}
