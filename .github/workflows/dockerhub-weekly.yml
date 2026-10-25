@@ -71,7 +71,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Tags are dates, so the built upstream release is read from the image label.
+      # latest carries the built upstream release in its image label.
       # Fail open: any lookup error means rebuild, which only overwrites tags.
       - name: Check whether latest already has this release
         id: check
@@ -112,10 +112,6 @@ jobs:
           path: src
           persist-credentials: false
 
-      - name: Get build date
-        id: date
-        run: echo "tag=$(TZ=Asia/Ho_Chi_Minh date +%Y%m%d)" >> "$GITHUB_OUTPUT"
-
       - name: Get upstream commit
         id: upstream
         working-directory: src
@@ -150,7 +146,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push date and latest tags
+      - name: Build and push version and latest tags
         uses: docker/build-push-action@v7
         with:
           context: src
@@ -161,7 +157,7 @@ jobs:
             VERSION=${{ needs.check-release.outputs.version }}
             COMMIT=${{ steps.upstream.outputs.sha }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ steps.date.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/jcode:${{ needs.check-release.outputs.version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/jcode:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ env.UPSTREAM }}
