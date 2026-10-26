@@ -715,10 +715,16 @@ func runInner(
 			}
 			for _, idx := range indices {
 				p := pending[idx]
+				// Tools without parameters stream empty arguments. Store "{}" so the
+				// session history never replays an empty tool_use input.
+				args := p.args.String()
+				if strings.TrimSpace(args) == "" {
+					args = "{}"
+				}
 				toolCalls = append(toolCalls, schema.ToolCall{
 					ID:       p.id,
 					Type:     p.typ,
-					Function: schema.FunctionCall{Name: p.name, Arguments: p.args.String()},
+					Function: schema.FunctionCall{Name: p.name, Arguments: args},
 				})
 			}
 			if messageText.Len() > 0 || reasoningText.Len() > 0 || len(toolCalls) > 0 || len(messageExtra) > 0 {
