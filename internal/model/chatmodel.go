@@ -1156,13 +1156,21 @@ func toEinoMessage(msg openai.ChatCompletionMessage) *schema.Message {
 func toOpenAIToolCalls(tcs []schema.ToolCall) []openai.ToolCall {
 	ret := make([]openai.ToolCall, len(tcs))
 	for i, tc := range tcs {
+		// Tools without parameters stream empty arguments; Anthropic-compatible
+		// backends then reject the replayed tool_use with "input: Field required".
+		args := strings.TrimSpace(tc.Function.Arguments)
+		if args == "" || args == "null" {
+			args = "{}"
+		} else {
+			args = tc.Function.Arguments
+		}
 		ret[i] = openai.ToolCall{
 			Index: tc.Index,
 			ID:    tc.ID,
 			Type:  openai.ToolTypeFunction,
 			Function: openai.FunctionCall{
 				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
+				Arguments: args,
 			},
 		}
 	}
