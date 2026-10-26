@@ -21,15 +21,32 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl wget gnupg git openssh-client jq unzip zip \
-        ripgrep procps less tzdata sudo bash-completion \
+        ripgrep procps less tzdata sudo bash-completion nodejs npm \
+        buildah uidmap slirp4netns \
     && userdel -r ubuntu \
     && groupadd --system --gid 1000 jcode \
     && useradd --system --uid 1000 --gid jcode --create-home --home-dir /home/jcode --shell /bin/bash jcode \
     && echo 'jcode ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/jcode \
     && chmod 0440 /etc/sudoers.d/jcode \
+    && echo 'jcode:100000:65536' >> /etc/subuid \
+    && echo 'jcode:100000:65536' >> /etc/subgid \
     && mkdir -p /workspace \
     && chown jcode:jcode /workspace \
     && rm -rf /var/lib/apt/lists/*
+
+# Rootless buildah: jcode builds container images from a Dockerfile without a Docker
+# daemon. vfs works without /dev/fuse or overlay mounts. Rootless storage defaults to
+# ~/.local/share/containers under /home/jcode (the persistent volume). vfs is slow and
+# space-hungry; switch to fuse-overlayfs if builds are too slow.
+RUN printf '%s\n' \
+        '[storage]' \
+        'driver = "vfs"' \
+    > /etc/containers/storage.conf \
+    && printf '%s\n' \
+        '[engine]' \
+        'cgroup_manager = "cgroupfs"' \
+        'events_logger = "file"' \
+    > /etc/containers/containers.conf
 
 # Browser for the jcode browser tool. Ubuntu's own chromium package is a snap stub
 # that cannot run in a container, so use Google's official apt repo (amd64 + arm64).
